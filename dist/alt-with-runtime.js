@@ -313,8 +313,6 @@ var Alt = (function () {
           function Store(alt) {
             babelHelpers.classCallCheck(this, Store);
 
-            this[LIFECYCLE] = {};
-            this[LISTENERS] = {};
             babelHelpers.get(Object.getPrototypeOf(Store.prototype), "constructor", this).call(this, alt);
           }
 
@@ -340,6 +338,9 @@ var Alt = (function () {
             return false;
           }
         });
+
+        Store.prototype[LIFECYCLE] = {};
+        Store.prototype[LISTENERS] = {};
 
         var store = new Store(this);
 

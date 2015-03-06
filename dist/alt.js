@@ -327,8 +327,6 @@ var Alt = (function () {
           function Store(alt) {
             _classCallCheck(this, Store);
 
-            this[LIFECYCLE] = {};
-            this[LISTENERS] = {};
             _get(Object.getPrototypeOf(Store.prototype), "constructor", this).call(this, alt);
           }
 
@@ -355,6 +353,9 @@ var Alt = (function () {
             return false;
           }
         });
+
+        Store.prototype[LIFECYCLE] = {};
+        Store.prototype[LISTENERS] = {};
 
         var store = new Store(this);
 
