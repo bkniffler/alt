@@ -792,22 +792,22 @@ var getInternalMethods = function (obj, excluded) {
 };
 
 var AltStore = (function () {
-  function AltStore(dispatcher, state) {
-    var _this6 = this;
+  function AltStore(dispatcher, model, state) {
+    var _this7 = this;
 
     _classCallCheck(this, AltStore);
 
     this[EE] = new EventEmitter();
     this[LIFECYCLE] = {};
-    this[STATE_CONTAINER] = state;
+    this[STATE_CONTAINER] = state || model;
 
-    assign(this[LIFECYCLE], state[LIFECYCLE]);
+    assign(this[LIFECYCLE], model[LIFECYCLE]);
 
     // Register dispatcher
     this.dispatchToken = dispatcher.register(function (payload) {
-      if (state[LISTENERS][payload.action]) {
-        var result = state[LISTENERS][payload.action](payload.data);
-        result !== false && _this6.emitChange();
+      if (model[LISTENERS][payload.action]) {
+        var result = model[LISTENERS][payload.action](payload.data);
+        result !== false && _this7.emitChange();
       }
     });
 
@@ -869,7 +869,7 @@ var ActionCreator = (function () {
   return ActionCreator;
 })();
 
-var StoreMixin = {
+var StoreMixinListeners = {
   on: function on(lifecycleEvent, handler) {
     this[LIFECYCLE][lifecycleEvent] = handler.bind(this);
   },
@@ -895,7 +895,7 @@ var StoreMixin = {
   },
 
   bindActions: function bindActions(actions) {
-    var _this6 = this;
+    var _this7 = this;
 
     Object.keys(actions).forEach(function (action) {
       var symbol = actions[action];
@@ -905,44 +905,45 @@ var StoreMixin = {
       });
       var handler = null;
 
-      if (_this6[action] && _this6[assumedEventHandler]) {
+      if (_this7[action] && _this7[assumedEventHandler]) {
         // If you have both action and onAction
         throw new ReferenceError("You have multiple action handlers bound to an action: " + ("" + action + " and " + assumedEventHandler));
-      } else if (_this6[action]) {
+      } else if (_this7[action]) {
         // action
-        handler = _this6[action];
-      } else if (_this6[assumedEventHandler]) {
+        handler = _this7[action];
+      } else if (_this7[assumedEventHandler]) {
         // onAction
-        handler = _this6[assumedEventHandler];
+        handler = _this7[assumedEventHandler];
       }
 
       if (handler) {
-        _this6.bindAction(symbol, handler);
+        _this7.bindAction(symbol, handler);
       }
     });
   },
 
   bindListeners: function bindListeners(obj) {
-    var _this6 = this;
+    var _this7 = this;
 
     Object.keys(obj).forEach(function (methodName) {
       var symbol = obj[methodName];
-      var listener = _this6[methodName];
+      var listener = _this7[methodName];
 
       if (!listener) {
-        throw new ReferenceError("" + methodName + " defined but does not exist in " + _this6._storeName);
+        throw new ReferenceError("" + methodName + " defined but does not exist in " + _this7._storeName);
       }
 
       if (Array.isArray(symbol)) {
         symbol.forEach(function (action) {
-          return _this6.bindAction(action, listener);
+          return _this7.bindAction(action, listener);
         });
       } else {
-        _this6.bindAction(symbol, listener);
+        _this7.bindAction(symbol, listener);
       }
     });
-  },
+  } };
 
+var StoreMixinEssentials = {
   waitFor: function waitFor(sources) {
     if (!sources) {
       throw new ReferenceError("Dispatch tokens not provided");
@@ -959,6 +960,10 @@ var StoreMixin = {
     });
 
     this.dispatcher.waitFor(tokens);
+  },
+
+  emitChange: function emitChange() {
+    this.getInstance().emitChange();
   }
 };
 
@@ -999,6 +1004,55 @@ var filterSnapshotOfStores = function (snapshot, storeNames) {
   return JSON.stringify(storesToReset);
 };
 
+var createStoreFromObject = function (alt, StoreModel, key, saveStore) {
+  var storeInstance = undefined;
+
+  var StoreProto = {};
+  StoreProto[LIFECYCLE] = {};
+  StoreProto[LISTENERS] = {};
+
+  assign(StoreProto, {
+    _storeName: key,
+    alt: alt,
+    dispatcher: alt.dispatcher,
+    getInstance: function getInstance() {
+      return storeInstance;
+    },
+    setState: function setState() {
+      var values = arguments[0] === undefined ? {} : arguments[0];
+
+      assign(this.state, values);
+      this.emitChange();
+      return false;
+    }
+  }, StoreMixinListeners, StoreMixinEssentials, StoreModel);
+
+  // bind the store listeners
+  /* istanbul ignore else */
+  if (StoreProto.bindListeners) {
+    StoreMixinListeners.bindListeners.call(StoreProto, StoreProto.bindListeners);
+  }
+
+  // bind the lifecycle events
+  /* istanbul ignore else */
+  if (StoreProto.lifecycle) {
+    Object.keys(StoreProto.lifecycle).forEach(function (event) {
+      StoreMixinListeners.on.call(StoreProto, event, StoreProto.lifecycle[event]);
+    });
+  }
+
+  // create the instance and assign the public methods to the instance
+  storeInstance = assign(new AltStore(alt.dispatcher, StoreProto, StoreProto.state), StoreProto.statics);
+
+  /* istanbul ignore else */
+  if (saveStore) {
+    alt.stores[key] = storeInstance;
+    saveInitialSnapshot(alt, key);
+  }
+
+  return storeInstance;
+};
+
 var Alt = (function () {
   function Alt() {
     _classCallCheck(this, Alt);
@@ -1036,6 +1090,10 @@ var Alt = (function () {
           key = uid(this.stores, key);
         }
 
+        if (typeof StoreModel === "object") {
+          return createStoreFromObject(this, StoreModel, key, saveStore);
+        }
+
         // Creating a class here so we don't overload the provided store's
         // prototype with the mixin behaviour and I'm extending from StoreModel
         // so we can inherit any extensions from the provided store.
@@ -1054,15 +1112,12 @@ var Alt = (function () {
           return Store;
         })(StoreModel);
 
-        assign(Store.prototype, StoreMixin, {
+        assign(Store.prototype, StoreMixinListeners, StoreMixinEssentials, {
           _storeName: key,
           alt: this,
           dispatcher: this.dispatcher,
           getInstance: function getInstance() {
             return storeInstance;
-          },
-          emitChange: function emitChange() {
-            this.getInstance().emitChange();
           },
           setState: function setState() {
             var values = arguments[0] === undefined ? {} : arguments[0];
@@ -1100,7 +1155,7 @@ var Alt = (function () {
     },
     createActions: {
       value: function createActions(ActionsClass) {
-        var _this6 = this;
+        var _this7 = this;
 
         var exportObj = arguments[1] === undefined ? {} : arguments[1];
 
@@ -1147,7 +1202,7 @@ var Alt = (function () {
           var actionName = Symbol("" + key + "#" + action);
 
           // Wrap the action so we can provide a dispatch method
-          var newAction = new ActionCreator(_this6, actionName, actions[action], obj);
+          var newAction = new ActionCreator(_this7, actionName, actions[action], obj);
 
           // Set all the properties on action
           obj[action] = newAction[ACTION_HANDLER];
